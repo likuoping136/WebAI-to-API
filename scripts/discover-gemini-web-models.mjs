@@ -7,11 +7,9 @@ const { chromium } = require('playwright');
 
 const OUTPUT = path.resolve(process.cwd(), 'config.models.json');
 const CDP_URL = process.env.WEBAI_CDP_URL || 'http://127.0.0.1:9223';
-const STABLE_IDS = {
-  lite: 'gemini-flash-lite-extended',
-  flash: 'gemini-flash-extended',
-  pro: 'gemini-pro-extended',
-};
+function modelIdFromDisplayName(displayName) {
+  return `gemini-${displayName.toLowerCase().replace(/\s+/g, '-')}-extended`;
+}
 
 function classify(displayName) {
   const name = displayName.toLowerCase();
@@ -88,7 +86,7 @@ async function main() {
     if (!kind) continue;
     const thinking = await readExtendedThinking(page, model.modeId);
     discovered.push({
-      id: STABLE_IDS[kind],
+      id: modelIdFromDisplayName(model.displayName),
       displayName: model.displayName,
       modeId: model.modeId,
       thinkingLevel: thinking.thinkingLevel,
@@ -96,7 +94,7 @@ async function main() {
     });
   }
 
-  const order = [STABLE_IDS.flash, STABLE_IDS.pro, STABLE_IDS.lite];
+  const order = ['gemini-3.5-flash-extended', 'gemini-3.1-pro-extended', 'gemini-3.1-flash-lite-extended'];
   discovered.sort((a, b) => order.indexOf(a.id) - order.indexOf(b.id));
 
   if (discovered.length !== 3) {

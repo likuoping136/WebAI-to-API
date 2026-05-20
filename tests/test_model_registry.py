@@ -25,7 +25,7 @@ def test_registry_loads_configured_models_and_builds_extended_header(tmp_path):
             {
                 "models": [
                     {
-                        "id": "gemini-flash-extended",
+                        "id": "gemini-3.5-flash-extended",
                         "displayName": "3.5 Flash",
                         "modeId": "fbb127bbb056c959",
                         "thinkingLevel": 2,
@@ -39,17 +39,17 @@ def test_registry_loads_configured_models_and_builds_extended_header(tmp_path):
 
     registry = ModelRegistry(config_path)
 
-    assert registry.model_ids() == ["gemini-flash-extended"]
+    assert registry.model_ids() == ["gemini-3.5-flash-extended"]
     assert registry.openai_models(created=123) == [
         {
-            "id": "gemini-flash-extended",
+            "id": "gemini-3.5-flash-extended",
             "object": "model",
             "created": 123,
             "owned_by": "google",
         }
     ]
-    assert registry.resolve("gemini-flash-extended") == {
-        "model_name": "gemini-flash-extended",
+    assert registry.resolve("gemini-3.5-flash-extended") == {
+        "model_name": "gemini-3.5-flash-extended",
         "model_header": {
             "x-goog-ext-525001261-jspb": '[1,null,null,null,"fbb127bbb056c959",null,null,0,[4],null,null,2]',
             "x-goog-ext-73010989-jspb": "[0]",

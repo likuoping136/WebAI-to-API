@@ -1,27 +1,27 @@
 {
   "models": [
     {
-      "id": "gemini-flash-extended",
+      "id": "gemini-3.5-flash-extended",
       "displayName": "3.5 Flash",
       "modeId": "fbb127bbb056c959",
       "thinkingLevel": 2,
-      "familyCode": 1
+      "familyCode": null
     },
     {
-      "id": "gemini-pro-extended",
+      "id": "gemini-3.1-pro-extended",
       "displayName": "3.1 Pro",
       "modeId": "9d8ca3786ebdfbea",
       "thinkingLevel": 2,
-      "familyCode": 3
+      "familyCode": null
     },
     {
-      "id": "gemini-flash-lite-extended",
+      "id": "gemini-3.1-flash-lite-extended",
       "displayName": "3.1 Flash-Lite",
       "modeId": "cf41b0e0dd7d53e5",
       "thinkingLevel": 2,
-      "familyCode": 6
+      "familyCode": null
     }
   ],
-  "updatedAt": "2026-05-20T12:58:01.737Z",
+  "updatedAt": "2026-05-20T14:03:48.687Z",
   "source": "gemini-web-cdp"
 }

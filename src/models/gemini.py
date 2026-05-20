@@ -35,21 +35,21 @@ def _build_custom_model(model_id: str, mode_id: str, thinking_level: int) -> dic
 DEFAULT_MODEL_CONFIG = {
     "models": [
         {
-            "id": "gemini-flash-extended",
+            "id": "gemini-3.5-flash-extended",
             "displayName": "3.5 Flash",
             "modeId": "fbb127bbb056c959",
             "thinkingLevel": 2,
             "familyCode": 1,
         },
         {
-            "id": "gemini-pro-extended",
+            "id": "gemini-3.1-pro-extended",
             "displayName": "3.1 Pro",
             "modeId": "9d8ca3786ebdfbea",
             "thinkingLevel": 2,
             "familyCode": 3,
         },
         {
-            "id": "gemini-flash-lite-extended",
+            "id": "gemini-3.1-flash-lite-extended",
             "displayName": "3.1 Flash-Lite",
             "modeId": "cf41b0e0dd7d53e5",
             "thinkingLevel": 2,
