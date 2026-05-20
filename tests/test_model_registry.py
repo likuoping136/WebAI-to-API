@@ -69,19 +69,12 @@ def test_unknown_model_raises_model_not_found_and_does_not_start_chat(monkeypatc
     assert fake_inner.started == []
 
 
-def test_model_not_found_error_response_is_openai_compatible():
-    response = chat_module.model_not_found_response("missing-model")
+def test_model_not_found_response_is_chat_completion_text_not_api_error():
+    response = chat_module.model_not_found_response("missing-model", stream=False)
 
-    assert response.status_code == 404
-    body = json.loads(response.body)
-    assert body == {
-        "error": {
-            "message": "Model not found: missing-model",
-            "type": "invalid_request_error",
-            "param": "model",
-            "code": "model_not_found",
-        }
-    }
+    assert response["choices"][0]["message"]["content"] == "模型不存在：missing-model"
+    assert response["choices"][0]["finish_reason"] == "stop"
+    assert response["model"] == "missing-model"
 
 
 def test_chat_completion_returns_model_not_found_without_sending_to_gemini(monkeypatch):
@@ -104,8 +97,7 @@ def test_chat_completion_returns_model_not_found_without_sending_to_gemini(monke
             )
         )
 
-        assert response.status_code == 404
-        assert json.loads(response.body)["error"]["code"] == "model_not_found"
+        assert response["choices"][0]["message"]["content"] == "模型不存在：missing-model"
         assert fake_client.started == ["missing-model"]
 
     import asyncio

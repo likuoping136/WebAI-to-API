@@ -3,7 +3,6 @@ import json
 import time
 from typing import Optional
 from fastapi import APIRouter, HTTPException
-from fastapi.responses import JSONResponse
 from app.logger import logger
 from schemas.request import GeminiRequest, OpenAIChatRequest
 from app.services.gemini_client import get_gemini_client, GeminiClientNotInitializedError
@@ -138,18 +137,8 @@ def convert_to_openai_format(response_text: str, model: str, stream: bool = Fals
     }
 
 
-def model_not_found_response(model: str) -> JSONResponse:
-    return JSONResponse(
-        status_code=404,
-        content={
-            "error": {
-                "message": f"Model not found: {model}",
-                "type": "invalid_request_error",
-                "param": "model",
-                "code": "model_not_found",
-            }
-        },
-    )
+def model_not_found_response(model: str, stream: bool = False):
+    return convert_to_openai_format(f"模型不存在：{model}", model, stream)
 
 
 @router.get("/v1/models")
