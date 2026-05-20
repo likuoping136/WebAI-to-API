@@ -6,7 +6,7 @@ const require = createRequire(import.meta.url);
 const { chromium } = require('playwright');
 
 const OUTPUT = path.resolve(process.cwd(), 'config.models.json');
-const CDP_URL = process.env.WEBAI_CDP_URL || 'http://127.0.0.1:9222';
+const CDP_URL = process.env.WEBAI_CDP_URL || 'http://127.0.0.1:9223';
 const STABLE_IDS = {
   lite: 'gemini-flash-lite-extended',
   flash: 'gemini-flash-extended',
@@ -30,8 +30,23 @@ function extractThinkingLevel(jslog) {
 
 async function ensureMenu(page) {
   if (await page.locator('gem-menu-item[data-mode-id]').count()) return;
-  await page.locator('button.input-area-switch').last().click();
-  await page.waitForTimeout(800);
+
+  const selectors = [
+    'button.input-area-switch',
+    'button:has-text("Gemini")',
+    'button:has-text("Flash")',
+    'button:has-text("Pro")',
+    'button:has-text("Lite")',
+  ];
+  for (const selector of selectors) {
+    const locator = page.locator(selector).last();
+    if (await locator.count()) {
+      await locator.click();
+      await page.waitForTimeout(800);
+      if (await page.locator('gem-menu-item[data-mode-id]').count()) return;
+    }
+  }
+  throw new Error('Gemini Web model menu button not found');
 }
 
 async function readModels(page) {

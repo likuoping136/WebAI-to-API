@@ -117,6 +117,7 @@ class DailyModelDiscovery:
         env = os.environ.copy()
         workspace_node_modules = r"C:\Users\kp\.openclaw\workspace\node_modules"
         env["NODE_PATH"] = workspace_node_modules + os.pathsep + env.get("NODE_PATH", "")
+        env.setdefault("WEBAI_CDP_URL", "http://127.0.0.1:9223")
         subprocess.run(
             ["node", str(MODEL_DISCOVERY_SCRIPT_PATH)],
             cwd=Path.cwd(),

@@ -1,4 +1,5 @@
 import json
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -141,3 +142,23 @@ def test_daily_discovery_failure_does_not_block_and_allows_retry(tmp_path):
     state = json.loads((tmp_path / "state.json").read_text(encoding="utf-8"))
     assert state["lastSuccessDate"] is None
     assert "cdp unavailable" in state["lastError"]
+
+
+def test_default_daily_discovery_uses_webai_cdp_port_9223(monkeypatch, tmp_path):
+    captured = {}
+
+    def fake_run(cmd, cwd, env, check, timeout, capture_output, text, encoding):
+        captured["env"] = env
+        return subprocess.CompletedProcess(cmd, 0)
+
+    monkeypatch.chdir(tmp_path)
+    scripts_dir = tmp_path / "scripts"
+    scripts_dir.mkdir()
+    (scripts_dir / "discover-gemini-web-models.mjs").write_text("", encoding="utf-8")
+    monkeypatch.delenv("WEBAI_CDP_URL", raising=False)
+    monkeypatch.setattr(subprocess, "run", fake_run)
+
+    discovery = DailyModelDiscovery(state_path=tmp_path / "state.json")
+    discovery._run_discovery_script()
+
+    assert captured["env"]["WEBAI_CDP_URL"] == "http://127.0.0.1:9223"
