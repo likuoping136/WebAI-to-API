@@ -167,59 +167,84 @@ async def chat_completions(request: OpenAIChatRequest):
     if not request.messages:
         raise HTTPException(status_code=400, detail="No messages provided.")
 
-    conversation_parts = []
-    
-    # Extract tools prompt
+    if not request.model:
+        raise HTTPException(status_code=400, detail="Model not specified in the request.")
+
+    # Build tools prompt from OpenAI tool definitions
     tools_prompt = _build_tools_prompt(request.tools) if request.tools else ""
 
-    # Merge tools prompt with system message if possible, otherwise prepend it
-    system_msg_index = -1
-    for i, msg in enumerate(request.messages):
-        if msg.get("role") == "system":
-            system_msg_index = i
-            break
-
-    if tools_prompt:
-        if system_msg_index != -1:
-            # Append to existing system message
-            orig_content = request.messages[system_msg_index].get("content") or ""
-            request.messages[system_msg_index]["content"] = f"{orig_content}\n\n{tools_prompt}".strip()
-        else:
-            # No system message, add one at the beginning
-            conversation_parts.append(tools_prompt)
+    # Separate system message, conversation turns, and latest user message
+    system_content = ""
+    history_turns = []  # list of (role, content) tuples for Gemini session
+    latest_user_msg = None
 
     for msg in request.messages:
         role = msg.get("role", "user")
         content = msg.get("content") or ""
 
         if role == "system":
-            conversation_parts.append(f"System: {content}")
+            system_content = content
         elif role == "user":
-            conversation_parts.append(f"User: {content}")
+            latest_user_msg = content
+            history_turns.append(("user", content))
         elif role == "assistant":
             tool_calls = msg.get("tool_calls")
             if tool_calls:
                 for tc in tool_calls:
                     fn = tc.get("function", {})
-                    conversation_parts.append(
-                        f"Assistant called tool {fn.get('name')}: {fn.get('arguments', '')}"
-                    )
+                    history_turns.append(("assistant", f"[Called tool {fn.get('name')} with args {fn.get('arguments', '')}]"))
             elif content:
-                conversation_parts.append(f"Assistant: {content}")
+                history_turns.append(("assistant", content))
         elif role == "tool":
             tool_call_id = msg.get("tool_call_id", "")
-            conversation_parts.append(f"Tool result [{tool_call_id}]: {content}")
+            history_turns.append(("tool", f"[Tool result {tool_call_id}]: {content}"))
 
-    if not conversation_parts:
-        raise HTTPException(status_code=400, detail="No valid messages found.")
+    if not latest_user_msg:
+        raise HTTPException(status_code=400, detail="No user message found.")
 
-    final_prompt = "\n\n".join(conversation_parts)
-
-    if not request.model:
-        raise HTTPException(status_code=400, detail="Model not specified in the request.")
+    # Prepend system + tools to the first user message for context
+    context_prefix = ""
+    if system_content:
+        context_prefix += f"[System Instructions]\n{system_content}\n\n"
+    if tools_prompt:
+        context_prefix += f"[Available Tools]\n{tools_prompt}\n\n"
+    if context_prefix:
+        context_prefix += "[End of System Instructions]\n\n"
 
     try:
-        response = await gemini_client.generate_content(message=final_prompt, model=request.model, files=None, gem=request.gem)
+        # Use ChatSession for structured multi-turn conversation
+        # This lets Gemini understand the dialogue structure instead of
+        # treating the whole history as a flat text blob.
+        chat_session = gemini_client.start_chat(model=request.model, gem=request.gem)
+
+        # Feed conversation history as structured turns
+        # Only send up to (but not including) the last user message as history,
+        # then send the last message separately to get the response.
+        history = history_turns[:-1]  # everything before the last user message
+
+        # If there's history, send it as a single context-setting message first
+        if history:
+            history_lines = []
+            for role, text in history:
+                if role == "user":
+                    history_lines.append(f"User: {text}")
+                elif role == "assistant":
+                    history_lines.append(f"Assistant: {text}")
+                elif role == "tool":
+                    history_lines.append(text)
+            history_prompt = "Previous conversation context:\n\n" + "\n".join(history_lines)
+            await chat_session.send_message(prompt=history_prompt, temporary=True)
+
+        # Send the latest user message with system/tools prefix
+        final_prompt = context_prefix + latest_user_msg if context_prefix else latest_user_msg
+        response = await chat_session.send_message(prompt=final_prompt)
+
+        # Clean up: delete the temporary chat from Gemini history
+        try:
+            await gemini_client.client.delete_chat(chat_session.cid)
+        except Exception as cleanup_err:
+            logger.debug(f"Failed to delete temporary chat: {cleanup_err}")
+
         logger.debug(f"Gemini raw response: {response.text!r}")
         tool_call = _parse_tool_call(response.text) if request.tools else None
         logger.debug(f"Parsed tool_call: {tool_call}")

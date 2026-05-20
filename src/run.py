@@ -33,10 +33,14 @@ from app.services.gemini_client import init_gemini_client
 
 # Conditionally import g4f runner function
 try:
+    import sys
+    # Block nodriver from being imported — it's incompatible with Python 3.14+
+    # and crashes at module level before our try/except can catch it
+    sys.modules['nodriver'] = type(sys)('nodriver')  # dummy module
     from g4f.api import run_api as run_g4f_api
 
     G4F_AVAILABLE = True
-except ImportError:
+except Exception:
     G4F_AVAILABLE = False
 
 

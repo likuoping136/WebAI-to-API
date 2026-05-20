@@ -6,6 +6,7 @@ import os
 import sqlite3
 import json
 import base64
+import configparser
 from pathlib import Path
 from typing import Optional, Literal, Dict, Any
 from app.config import CONFIG
@@ -32,6 +33,27 @@ class CrossPlatformCookieExtractor:
         self.is_windows = self.system == "windows"
         logger.info(f"Initialized cookie extractor for {self.system}")
     
+    def _get_cdp_port(self) -> int:
+        """Get CDP port from environment or config.conf, defaulting to 9222."""
+        env_port = os.getenv("WEBAI_CDP_PORT")
+        if env_port:
+            try:
+                return int(env_port)
+            except ValueError:
+                logger.warning(f"Invalid WEBAI_CDP_PORT value '{env_port}', falling back to config/default")
+
+        try:
+            config_file = Path("config.conf")
+            if config_file.exists():
+                parser = configparser.ConfigParser()
+                parser.read(config_file, encoding="utf-8-sig")
+                return parser.getint("Browser", "cdp_port", fallback=9222)
+
+            return CONFIG.getint("Browser", "cdp_port", fallback=9222)
+        except Exception as e:
+            logger.warning(f"Invalid Browser.cdp_port config, falling back to 9222: {e}")
+            return 9222
+
     def _get_browser_profile_paths(self, browser_name: str) -> Dict[str, Any]:
         """Get browser profile paths for different operating systems"""
         paths = {}
@@ -322,17 +344,112 @@ class CrossPlatformCookieExtractor:
             logger.error(f"Failed to extract Chromium cookies directly: {e}")
             return None
     
+    def _try_cdp_cookies(self, browser_name: str, domain: str = "gemini.google.com") -> Optional[Any]:
+        """Get cookies via Chrome DevTools Protocol (CDP) — works even when Chrome is running.
+        Uses websocket-client with suppress_origin to avoid 403 errors."""
+        try:
+            import http.client
+            import json as _json
+
+            CDP_PORT = self._get_cdp_port()
+
+            # 1. Get browser WebSocket URL from /json/version
+            try:
+                conn = http.client.HTTPConnection("localhost", CDP_PORT, timeout=5)
+                conn.request("GET", "/json/version")
+                resp = conn.getresponse()
+                if resp.status != 200:
+                    logger.debug(f"CDP not available at localhost:{CDP_PORT}")
+                    return None
+                version_info = _json.loads(resp.read().decode())
+                ws_url = version_info.get("webSocketDebuggerUrl")
+                if not ws_url:
+                    logger.debug("No webSocketDebuggerUrl in /json/version")
+                    return None
+                logger.info(f"CDP detected at localhost:{CDP_PORT}, reading cookies via CDP")
+            except Exception as e:
+                logger.debug(f"CDP not reachable at localhost:{CDP_PORT}: {e}")
+                return None
+
+            # 2. Connect via WebSocket to the browser target
+            try:
+                import websocket
+
+                ws = websocket.create_connection(ws_url, timeout=10, suppress_origin=True)
+                msg_id = 1
+
+                # Get all cookies via Storage.getCookies (browser-level, no target attachment needed)
+                ws.send(_json.dumps({
+                    "id": msg_id,
+                    "method": "Storage.getCookies"
+                }))
+
+                result = None
+                for _ in range(20):  # drain events until we find our response
+                    raw = ws.recv()
+                    msg = _json.loads(raw)
+                    if msg.get("id") == msg_id:
+                        result = msg
+                        break
+
+                ws.close()
+
+                if not result or "result" not in result:
+                    logger.warning(f"CDP Storage.getCookies returned no result")
+                    return None
+
+                raw_cookies = result["result"].get("cookies", [])
+
+                # Return ALL cookies (not just domain-filtered) so the caller can find what it needs
+                # The caller filters by specific cookie names like __Secure-1PSID
+                if raw_cookies:
+                    # Convert all CDP cookie dicts to simple cookie-like objects
+                    cookie_objects = []
+                    for c in raw_cookies:
+                        cookie_obj = type('Cookie', (), {
+                            'name': c['name'],
+                            'value': c['value'],
+                            'domain': c.get('domain', ''),
+                            'path': c.get('path', '/'),
+                            'secure': c.get('secure', False),
+                            'httponly': c.get('httpOnly', False),
+                        })()
+                        cookie_objects.append(cookie_obj)
+
+                    logger.info(f"Successfully retrieved {len(cookie_objects)} total cookies via CDP")
+                    return cookie_objects
+                else:
+                    logger.warning(f"No cookies found via CDP")
+                    return None
+
+            except ImportError:
+                logger.warning("websocket-client not installed, CDP method unavailable")
+                return None
+            except Exception as e:
+                logger.warning(f"CDP WebSocket cookie extraction failed: {e}")
+                return None
+
+        except Exception as e:
+            logger.warning(f"CDP cookie extraction failed: {e}")
+            return None
+
     def get_cookies_with_fallback(self, browser_name: str) -> Optional[Any]:
         """Get cookies with multiple fallback methods"""
         logger.info(f"Attempting to get cookies from {browser_name} with fallback methods")
-        
-        # Method 1: Try browser_cookie3 first (works well on Linux)
+
+        # Method 0 (highest priority): CDP — works when Chrome is running
+        cookies = self._try_cdp_cookies(browser_name)
+        if cookies:
+            logger.info(f"Successfully retrieved cookies via CDP for {browser_name}")
+            return cookies
+
+        # Method 1: Try browser_cookie3 (works well on Linux / Chrome not running)
         cookies = self._try_browser_cookie3(browser_name)
         if cookies:
             logger.info(f"Successfully retrieved cookies using browser_cookie3 for {browser_name}")
             return cookies
-        
-        # Method 2: Try direct database access (fallback for Windows)
+
+        # Method 2: Try direct database access (fallback for Windows, Chrome not running)
         if self.is_windows:
             logger.info(f"Trying direct database access for {browser_name} on Windows")
             
