@@ -7,7 +7,7 @@ from app.logger import logger
 from schemas.request import GeminiRequest, OpenAIChatRequest
 from app.services.gemini_client import get_gemini_client, GeminiClientNotInitializedError
 from app.services.session_manager import get_translate_session_manager
-from models.gemini import ModelNotFoundError, get_model_registry
+from models.gemini import ModelNotFoundError, get_model_registry, refresh_models_if_needed
 
 router = APIRouter()
 
@@ -143,6 +143,7 @@ def model_not_found_response(model: str, stream: bool = False):
 
 @router.get("/v1/models")
 async def list_models():
+    refresh_models_if_needed()
     ts = int(time.time())
     return {
         "object": "list",
@@ -152,6 +153,7 @@ async def list_models():
 
 @router.post("/v1/chat/completions")
 async def chat_completions(request: OpenAIChatRequest):
+    refresh_models_if_needed()
     try:
         gemini_client = get_gemini_client()
     except GeminiClientNotInitializedError as e:

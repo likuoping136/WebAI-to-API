@@ -2,7 +2,9 @@ import configparser
 import json
 import logging
 import os
-from typing import Optional, List, Union, Any
+import subprocess
+from datetime import datetime
+from typing import Optional, List, Union, Any, Callable
 from pathlib import Path
 from gemini_webapi import GeminiClient as WebGeminiClient
 from app.config import CONFIG
@@ -10,6 +12,8 @@ from app.config import CONFIG
 logger = logging.getLogger("app")
 
 MODEL_CONFIG_PATH = Path("config.models.json")
+MODEL_DISCOVERY_STATE_PATH = Path("tmp/gemini-model-discovery-state.json")
+MODEL_DISCOVERY_SCRIPT_PATH = Path("scripts/discover-gemini-web-models.mjs")
 MODEL_HEADER_KEY = "x-goog-ext-525001261-jspb"
 
 
@@ -53,6 +57,80 @@ DEFAULT_MODEL_CONFIG = {
         },
     ]
 }
+
+
+class DailyModelDiscovery:
+    """Refresh Gemini Web model config at most once per local day."""
+
+    def __init__(
+        self,
+        state_path: Path = MODEL_DISCOVERY_STATE_PATH,
+        today: Callable[[], str] | None = None,
+        runner: Callable[[], None] | None = None,
+    ):
+        self.state_path = Path(state_path)
+        self.today = today or (lambda: datetime.now().date().isoformat())
+        self.runner = runner or self._run_discovery_script
+
+    def refresh_if_needed(self) -> None:
+        state = self._read_state()
+        current_date = self.today()
+        if state.get("lastSuccessDate") == current_date:
+            return
+
+        try:
+            self.runner()
+        except Exception as e:
+            logger.warning(f"Gemini Web model discovery failed; using existing config.models.json: {e}")
+            self._write_state({
+                **state,
+                "lastSuccessDate": state.get("lastSuccessDate"),
+                "lastError": str(e),
+                "lastErrorAt": datetime.now().isoformat(),
+            })
+            return
+
+        self._write_state({
+            "lastSuccessDate": current_date,
+            "lastSuccessAt": datetime.now().isoformat(),
+            "lastError": None,
+        })
+
+    def _read_state(self) -> dict[str, Any]:
+        if not self.state_path.exists():
+            return {}
+        try:
+            with self.state_path.open("r", encoding="utf-8") as f:
+                return json.load(f)
+        except Exception:
+            return {}
+
+    def _write_state(self, state: dict[str, Any]) -> None:
+        self.state_path.parent.mkdir(parents=True, exist_ok=True)
+        with self.state_path.open("w", encoding="utf-8") as f:
+            json.dump(state, f, ensure_ascii=False, indent=2)
+            f.write("\n")
+
+    def _run_discovery_script(self) -> None:
+        if not MODEL_DISCOVERY_SCRIPT_PATH.exists():
+            raise FileNotFoundError(f"Discovery script not found: {MODEL_DISCOVERY_SCRIPT_PATH}")
+        env = os.environ.copy()
+        workspace_node_modules = r"C:\Users\kp\.openclaw\workspace\node_modules"
+        env["NODE_PATH"] = workspace_node_modules + os.pathsep + env.get("NODE_PATH", "")
+        subprocess.run(
+            ["node", str(MODEL_DISCOVERY_SCRIPT_PATH)],
+            cwd=Path.cwd(),
+            env=env,
+            check=True,
+            timeout=20,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+        )
+
+
+def refresh_models_if_needed() -> None:
+    DailyModelDiscovery().refresh_if_needed()
 
 
 class ModelRegistry:

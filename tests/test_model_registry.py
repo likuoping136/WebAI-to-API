@@ -4,7 +4,7 @@ from pathlib import Path
 import pytest
 
 from schemas.request import OpenAIChatRequest
-from models.gemini import ModelNotFoundError, ModelRegistry, MyGeminiClient
+from models.gemini import DailyModelDiscovery, ModelNotFoundError, ModelRegistry, MyGeminiClient
 from app.endpoints import chat as chat_module
 
 
@@ -103,3 +103,41 @@ def test_chat_completion_returns_model_not_found_without_sending_to_gemini(monke
     import asyncio
 
     asyncio.run(run())
+
+
+def test_daily_discovery_runs_once_per_day(tmp_path):
+    calls = []
+
+    discovery = DailyModelDiscovery(
+        state_path=tmp_path / "state.json",
+        today=lambda: "2026-05-20",
+        runner=lambda: calls.append("run"),
+    )
+
+    discovery.refresh_if_needed()
+    discovery.refresh_if_needed()
+
+    assert calls == ["run"]
+    assert json.loads((tmp_path / "state.json").read_text(encoding="utf-8"))["lastSuccessDate"] == "2026-05-20"
+
+
+def test_daily_discovery_failure_does_not_block_and_allows_retry(tmp_path):
+    calls = []
+
+    def failing_runner():
+        calls.append("run")
+        raise RuntimeError("cdp unavailable")
+
+    discovery = DailyModelDiscovery(
+        state_path=tmp_path / "state.json",
+        today=lambda: "2026-05-20",
+        runner=failing_runner,
+    )
+
+    discovery.refresh_if_needed()
+    discovery.refresh_if_needed()
+
+    assert calls == ["run", "run"]
+    state = json.loads((tmp_path / "state.json").read_text(encoding="utf-8"))
+    assert state["lastSuccessDate"] is None
+    assert "cdp unavailable" in state["lastError"]
