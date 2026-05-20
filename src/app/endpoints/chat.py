@@ -3,10 +3,12 @@ import json
 import time
 from typing import Optional
 from fastapi import APIRouter, HTTPException
+from fastapi.responses import JSONResponse
 from app.logger import logger
 from schemas.request import GeminiRequest, OpenAIChatRequest
 from app.services.gemini_client import get_gemini_client, GeminiClientNotInitializedError
 from app.services.session_manager import get_translate_session_manager
+from models.gemini import ModelNotFoundError, get_model_registry
 
 router = APIRouter()
 
@@ -136,22 +138,26 @@ def convert_to_openai_format(response_text: str, model: str, stream: bool = Fals
     }
 
 
+def model_not_found_response(model: str) -> JSONResponse:
+    return JSONResponse(
+        status_code=404,
+        content={
+            "error": {
+                "message": f"Model not found: {model}",
+                "type": "invalid_request_error",
+                "param": "model",
+                "code": "model_not_found",
+            }
+        },
+    )
+
+
 @router.get("/v1/models")
 async def list_models():
-    from gemini_webapi.constants import Model
     ts = int(time.time())
     return {
         "object": "list",
-        "data": [
-            {
-                "id": model.model_name,
-                "object": "model",
-                "created": ts,
-                "owned_by": "google",
-            }
-            for model in Model
-            if model != Model.UNSPECIFIED
-        ],
+        "data": get_model_registry().openai_models(created=ts),
     }
 
 
@@ -259,6 +265,8 @@ async def chat_completions(request: OpenAIChatRequest):
             return StreamingResponse(sse_stream(), media_type="text/event-stream")
             
         return openai_response
+    except ModelNotFoundError:
+        return model_not_found_response(request.model)
     except Exception as e:
         logger.error(f"Error in /v1/chat/completions endpoint: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Error processing chat completion: {str(e)}")
